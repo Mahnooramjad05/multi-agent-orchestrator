@@ -1,0 +1,49 @@
+# Benchmark goals for the agentic-eval harness.
+#
+# Each entry has:
+#   goal           - the natural-language goal to send through the orchestrator graph
+#   expected_facts - key facts/substrings that should appear (directly or via
+#                     embedding similarity) in the final synthesized answer
+
+- goal: "Tell me about Acme Robotics, including where it is headquartered and what its main product is."
+  expected_facts:
+    - "Austin"
+    - "AutoPick"
+
+- goal: "What is the AutoPick arm and how many items per hour can it sort?"
+  expected_facts:
+    - "AutoPick"
+    - "1200"
+
+- goal: "Explain how photovoltaic solar panels work and their typical efficiency range."
+  expected_facts:
+    - "photovoltaic"
+    - "efficiency"
+
+- goal: "What percentage of global electricity generation comes from renewable energy sources?"
+  expected_facts:
+    - "renewable"
+    - "30 percent"
+
+- goal: "Who created the Python programming language and when was it first released?"
+  expected_facts:
+    - "Guido van Rossum"
+    - "1991"
+
+- goal: "Who invented the World Wide Web and where did they work at the time?"
+  expected_facts:
+    - "Tim Berners-Lee"
+    - "CERN"
+
+- goal: "Calculate the result of 12 * 7 + 5 and explain what it represents."
+  expected_facts:
+    - "89"
+
+- goal: "What is machine learning and what are its main categories?"
+  expected_facts:
+    - "supervised"
+    - "unsupervised"
+
+- goal: "Which country produces the most coffee in the world?"
+  expected_facts:
+    - "Brazil"

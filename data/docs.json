@@ -1,0 +1,42 @@
+[
+  {
+    "id": "doc-1",
+    "title": "Company Overview",
+    "text": "Acme Robotics was founded in 2015 and is headquartered in Austin, Texas. The company builds warehouse automation robots and had revenue of 42 million dollars in its most recent fiscal year. Acme Robotics employs approximately 310 people."
+  },
+  {
+    "id": "doc-2",
+    "title": "Product Line",
+    "text": "Acme Robotics' flagship product is the AutoPick arm, a robotic picking arm used in logistics warehouses. The AutoPick arm can sort up to 1200 items per hour and was first released in 2019. The second generation, AutoPick Mark II, launched in 2022 with a 30 percent speed improvement."
+  },
+  {
+    "id": "doc-3",
+    "title": "Solar Energy Basics",
+    "text": "Photovoltaic solar panels convert sunlight directly into electricity using the photovoltaic effect. A typical residential solar panel has an efficiency of 15 to 22 percent. Solar panel efficiency has improved steadily since the 1990s due to better semiconductor materials."
+  },
+  {
+    "id": "doc-4",
+    "title": "Climate and Renewable Energy",
+    "text": "Renewable energy sources, including solar, wind, and hydroelectric power, accounted for roughly 30 percent of global electricity generation in recent years. Solar power is the fastest-growing renewable energy source worldwide, driven by falling panel costs."
+  },
+  {
+    "id": "doc-5",
+    "title": "Python Programming Language",
+    "text": "Python is a high-level, general-purpose programming language created by Guido van Rossum and first released in 1991. Python emphasizes code readability and supports multiple programming paradigms, including procedural, object-oriented, and functional programming."
+  },
+  {
+    "id": "doc-6",
+    "title": "History of the Internet",
+    "text": "The Internet originated from research funded by the United States Department of Defense in the 1960s, notably the ARPANET project. The World Wide Web was invented by Tim Berners-Lee in 1989 while working at CERN, making the Internet broadly accessible to the public in the 1990s."
+  },
+  {
+    "id": "doc-7",
+    "title": "Coffee Market",
+    "text": "Brazil is the world's largest producer of coffee, followed by Vietnam and Colombia. Global coffee consumption has increased steadily, with specialty coffee representing a growing share of the market. Arabica beans generally command higher prices than Robusta beans."
+  },
+  {
+    "id": "doc-8",
+    "title": "Basics of Machine Learning",
+    "text": "Machine learning is a subset of artificial intelligence in which systems learn patterns from data rather than following explicit rules. Common categories include supervised learning, unsupervised learning, and reinforcement learning. Neural networks are a family of models loosely inspired by biological brains."
+  }
+]

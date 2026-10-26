@@ -24,17 +24,19 @@ import time
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional, Union
 
 import numpy as np
 import yaml
 
 from agentic_memory.manager import MemoryManager
+from orchestrator.calibration import Calibrator, Sample, brier_score, expected_calibration_error
 from orchestrator.graph import episode_from_state, run_goal
 from orchestrator.schemas import AttemptRecord
 
 DEFAULT_BENCHMARKS_PATH = Path("benchmarks") / "goals.yaml"
 SIMILARITY_MATCH_THRESHOLD = 0.65
+WRITER_SUCCESS_THRESHOLD = 0.5
 
 
 @dataclass
@@ -69,6 +71,8 @@ class EvalReport:
     total_tokens: int = 0
     tokens_estimated: bool = False
     stop_reasons: dict = field(default_factory=dict)
+    confidence_ece: float = 0.0
+    confidence_brier: float = 0.0
 
     def to_dict(self) -> dict:
         return {
@@ -103,6 +107,8 @@ class EvalReport:
                 "total_tokens": self.total_tokens,
                 "tokens_estimated": self.tokens_estimated,
                 "stop_reasons": self.stop_reasons,
+                "confidence_ece": round(self.confidence_ece, 4),
+                "confidence_brier": round(self.confidence_brier, 4),
                 "num_goals": len(self.results),
             },
         }
@@ -141,6 +147,42 @@ def score_completion(final_answer: str, expected_facts: list[str], embed_fn) -> 
     return score, found, missed
 
 
+def label_attempts(
+    attempts: list[AttemptRecord], expected_facts: list[str], completion_score: float
+) -> list[Sample]:
+    """Label each worker attempt as a success or failure, for calibration.
+
+    This is a proxy, since benchmarks list expected facts per goal rather than
+    per subtask: research and calculator attempts succeed if their output
+    contains at least one expected fact (case-insensitive); writer attempts
+    succeed if the goal's completion score is >= WRITER_SUCCESS_THRESHOLD.
+    The `confidence` on each sample is the attempt's raw score.
+    """
+    samples = []
+    for attempt in attempts:
+        if attempt.status in ("reused", "skipped_budget") or attempt.raw_confidence is None:
+            continue  # duplicates or attempts that never ran
+        if attempt.worker == "writer":
+            success = completion_score >= WRITER_SUCCESS_THRESHOLD
+        else:
+            output = attempt.output.lower()
+            success = any(fact.lower() in output for fact in expected_facts)
+        samples.append(Sample(worker=attempt.worker, confidence=attempt.raw_confidence, success=success))
+    return samples
+
+
+def _confidence_pairs(results: list[GoalResult]) -> list[tuple[float, bool]]:
+    """(confidence the graph acted on, success) for every attempt that ran."""
+    pairs = []
+    for r in results:
+        ran = [a for a in r.attempts
+               if a.status not in ("reused", "skipped_budget") and a.raw_confidence is not None]
+        for attempt, sample in zip(ran, label_attempts(r.attempts, r.expected_facts, r.completion_score)):
+            used = attempt.calibrated_confidence if attempt.calibrated_confidence is not None else sample.confidence
+            pairs.append((used, sample.success))
+    return pairs
+
+
 def score_efficiency(llm_calls: int, worker_invocations: int, replans: int) -> float:
     """
     Normalize raw counts into a [0, 1] efficiency score where fewer calls is
@@ -158,6 +200,7 @@ def run_eval(
     benchmarks_path: Optional[Path] = None,
     memory: Optional[MemoryManager] = None,
     log_episodes: bool = True,
+    calibrator: Union[Calibrator, None, Literal["auto"]] = "auto",
 ) -> EvalReport:
     """Run every benchmark goal through the orchestrator graph and score it."""
     memory = memory or MemoryManager()
@@ -171,7 +214,11 @@ def run_eval(
         memory.reset_counters()
         start = time.perf_counter()
         final_state = run_goal(
-            goal_text, memory, session_id=f"eval-{abs(hash(goal_text))}", log_episode=False
+            goal_text,
+            memory,
+            session_id=f"eval-{abs(hash(goal_text))}",
+            log_episode=False,
+            calibrator=calibrator,
         )
         duration = time.perf_counter() - start
 
@@ -213,6 +260,7 @@ def run_eval(
     avg_completion = sum(r.completion_score for r in results) / len(results) if results else 0.0
     avg_efficiency = sum(r.efficiency_score for r in results) / len(results) if results else 0.0
 
+    pairs = _confidence_pairs(results)
     return EvalReport(
         results=results,
         average_completion_score=avg_completion,
@@ -223,6 +271,8 @@ def run_eval(
         total_tokens=sum(r.input_tokens + r.output_tokens for r in results),
         tokens_estimated=memory.tokens_estimated,
         stop_reasons=dict(Counter(r.stop_reason for r in results)),
+        confidence_ece=expected_calibration_error(pairs),
+        confidence_brier=brier_score(pairs),
     )
 
 
@@ -247,6 +297,8 @@ def print_report(report: EvalReport) -> None:
           f"Total replans: {report.total_replans}")
     estimated = " (estimated)" if report.tokens_estimated else ""
     print(f"Total tokens: {report.total_tokens}{estimated}  Stop reasons: {report.stop_reasons}")
+    print(f"Confidence calibration: ECE {report.confidence_ece:.3f}  Brier {report.confidence_brier:.3f}"
+          "  (lower is better; see python -m eval.calibrate)")
     print("=" * 72)
 
 

@@ -16,6 +16,8 @@ os.environ["LLM_PROVIDER"] = "mock"
 # run_goal() logs every run; keep test runs out of the repo's data/ folder.
 os.environ["EPISODIC_LOG_PATH"] = str(Path(tempfile.mkdtemp()) / "episodic_log.jsonl")
 os.environ.pop("IDEMPOTENCY_DB", None)
+# Tests opt into calibration explicitly; never pick up a locally fitted data/calibration.json.
+os.environ["CALIBRATION_PATH"] = str(Path(tempfile.mkdtemp()) / "no_calibration.json")
 
 from agentic_memory.manager import MemoryManager  # noqa: E402
 from orchestrator.llm_client import MockLLMClient, reset_llm_client_cache  # noqa: E402

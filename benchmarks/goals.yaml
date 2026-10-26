@@ -47,3 +47,92 @@
 - goal: "Which country produces the most coffee in the world?"
   expected_facts:
     - "Brazil"
+
+# --- Added for confidence calibration: more goals, including some whose
+# answers are not in the document store (negative examples). ---
+
+- goal: "When was Acme Robotics founded?"
+  expected_facts:
+    - "2015"
+
+- goal: "How many people does Acme Robotics employ?"
+  expected_facts:
+    - "310"
+
+- goal: "When did the AutoPick Mark II launch?"
+  expected_facts:
+    - "2022"
+
+- goal: "How much did Acme Robotics raise in its Series C round?"
+  expected_facts:
+    - "60 million"
+
+- goal: "Where is Acme Robotics opening its second factory?"
+  expected_facts:
+    - "Monterrey"
+
+- goal: "How tall is Mount Everest?"
+  expected_facts:
+    - "8,849"
+
+- goal: "Who made the first confirmed ascent of Mount Everest, and in what year?"
+  expected_facts:
+    - "Hillary"
+    - "1953"
+
+- goal: "Who described the double-helix structure of DNA?"
+  expected_facts:
+    - "Watson"
+    - "Crick"
+
+- goal: "What are the four bases that make up DNA?"
+  expected_facts:
+    - "adenine"
+
+- goal: "When was the Eiffel Tower completed?"
+  expected_facts:
+    - "1889"
+
+- goal: "In what year did Apollo 11 land on the Moon?"
+  expected_facts:
+    - "1969"
+
+- goal: "Which Apollo 11 astronaut stayed in lunar orbit?"
+  expected_facts:
+    - "Michael Collins"
+
+- goal: "What gas do plants release during photosynthesis?"
+  expected_facts:
+    - "oxygen"
+
+- goal: "Where in a plant cell does photosynthesis take place?"
+  expected_facts:
+    - "chloroplasts"
+
+- goal: "What is the speed of light in a vacuum?"
+  expected_facts:
+    - "299,792,458"
+
+- goal: "How long is the Great Barrier Reef?"
+  expected_facts:
+    - "2,300"
+
+- goal: "Which country is the second-largest coffee producer?"
+  expected_facts:
+    - "Vietnam"
+
+- goal: "Calculate 1200 * 8 to estimate items the AutoPick arm sorts in an 8-hour shift."
+  expected_facts:
+    - "9600"
+
+- goal: "Compute (42 - 7) * 3."
+  expected_facts:
+    - "105"
+
+- goal: "What is the tallest mountain in Africa?"
+  expected_facts:
+    - "Kilimanjaro"
+
+- goal: "Who painted the Mona Lisa?"
+  expected_facts:
+    - "Leonardo da Vinci"

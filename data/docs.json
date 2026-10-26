@@ -38,5 +38,37 @@
     "id": "doc-8",
     "title": "Basics of Machine Learning",
     "text": "Machine learning is a subset of artificial intelligence in which systems learn patterns from data rather than following explicit rules. Common categories include supervised learning, unsupervised learning, and reinforcement learning. Neural networks are a family of models loosely inspired by biological brains."
+  },
+  {
+    "title": "Acme Robotics Funding",
+    "text": "In 2023 Acme Robotics raised a 60 million dollar Series C funding round led by Northstar Ventures. The company is using the funding to open a second factory in Monterrey, Mexico, and to expand its sales team in Europe."
+  },
+  {
+    "title": "Mount Everest",
+    "text": "Mount Everest is the highest mountain above sea level, with an official height of 8,849 meters announced jointly by China and Nepal in 2020. It sits on the border between Nepal and the Tibet Autonomous Region of China. Edmund Hillary and Tenzing Norgay made the first confirmed ascent in 1953."
+  },
+  {
+    "title": "Structure of DNA",
+    "text": "The double-helix structure of DNA was described by James Watson and Francis Crick in 1953, building on X-ray diffraction images produced by Rosalind Franklin. DNA is built from four bases: adenine, thymine, guanine and cytosine."
+  },
+  {
+    "title": "Eiffel Tower",
+    "text": "The Eiffel Tower in Paris was completed in 1889 as the entrance arch for that year's World's Fair. It was designed and built by the engineering company of Gustave Eiffel and is about 330 meters tall including its antennas."
+  },
+  {
+    "title": "Apollo 11 Moon Landing",
+    "text": "Apollo 11 landed on the Moon on July 20, 1969. Neil Armstrong and Buzz Aldrin walked on the lunar surface, while Michael Collins remained in lunar orbit aboard the command module Columbia."
+  },
+  {
+    "title": "Photosynthesis",
+    "text": "Photosynthesis is the process by which plants, algae and some bacteria convert light energy into chemical energy. It takes in carbon dioxide and water and releases oxygen as a by-product. In plants, photosynthesis takes place in chloroplasts."
+  },
+  {
+    "title": "Speed of Light",
+    "text": "The speed of light in a vacuum is exactly 299,792,458 meters per second. Since 1983 the meter has been defined in terms of this constant, which is usually written as c."
+  },
+  {
+    "title": "Great Barrier Reef",
+    "text": "The Great Barrier Reef, off the coast of Queensland in Australia, is the world's largest coral reef system. It stretches for more than 2,300 kilometers and is made up of nearly 3,000 individual reefs."
   }
 ]

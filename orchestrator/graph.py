@@ -14,7 +14,9 @@ Graph structure
 - dispatch_workers  : runs every pending subtask through its assigned worker
                       node (research / calculator / writer), collecting a
                       WorkerResult (with self-reported confidence) for each.
-                      Every attempt is recorded as an AttemptRecord and keyed
+                      When a calibration file is present, the raw confidence
+                      is mapped to a calibrated one before the threshold is
+                      applied. Every attempt is recorded as an AttemptRecord and keyed
                       by an idempotency key, so a completed attempt is never
                       executed twice.
 - assess            : decides whether to stop, and records why in
@@ -35,12 +37,13 @@ from __future__ import annotations
 import time
 import uuid
 from datetime import datetime, timezone
-from typing import Optional, TypedDict
+from typing import Literal, Optional, TypedDict, Union
 
 from langgraph.graph import END, StateGraph
 
 from agentic_memory.manager import MemoryManager
 from orchestrator.budget import Budget, BudgetTracker
+from orchestrator.calibration import Calibrator, load_calibrator
 from orchestrator.idempotency import make_idempotency_key
 from orchestrator.schemas import (
     AttemptRecord,
@@ -92,7 +95,11 @@ def _attempt_key(state: OrchestratorState, execution: SubTaskExecution) -> str:
     )
 
 
-def build_graph(memory: MemoryManager, tracker: Optional[BudgetTracker] = None):
+def build_graph(
+    memory: MemoryManager,
+    tracker: Optional[BudgetTracker] = None,
+    calibrator: Optional[Calibrator] = None,
+):
     """Construct and compile the LangGraph StateGraph for one orchestrator run."""
     tracker = tracker or BudgetTracker(Budget(), memory)
 
@@ -142,6 +149,8 @@ def build_graph(memory: MemoryManager, tracker: Optional[BudgetTracker] = None):
                 memory.idempotency.put(key, result)
 
         execution.result = result
+        if calibrator is not None and status != "error":
+            execution.calibrated_confidence = calibrator.calibrate(subtask.worker, result.confidence)
         effective = execution.effective_confidence
         if status == "ok" and effective is not None and effective < CONFIDENCE_THRESHOLD:
             status = "low_confidence"
@@ -324,6 +333,7 @@ def run_goal(
     run_id: Optional[str] = None,
     log_episode: bool = True,
     budget: Optional[Budget] = None,
+    calibrator: Union[Calibrator, None, Literal["auto"]] = "auto",
 ) -> OrchestratorState:
     """Convenience entry point: run one goal through the compiled graph end to end.
 
@@ -332,10 +342,14 @@ def run_goal(
     Set `log_episode=False` when the caller logs the episode itself (the eval
     harness does, so it can attach a completion score). `budget` defaults to
     BUDGET_MAX_TOKENS / BUDGET_MAX_SECONDS from the environment (unlimited if unset).
+    `calibrator="auto"` loads data/calibration.json (or CALIBRATION_PATH) when it
+    exists; pass None to use raw worker confidence.
     """
+    if calibrator == "auto":
+        calibrator = load_calibrator()
     tracker = BudgetTracker(budget or Budget.from_env(), memory)
     tokens_in, tokens_out = memory.input_tokens, memory.output_tokens
-    compiled = build_graph(memory, tracker)
+    compiled = build_graph(memory, tracker, calibrator)
     initial_state: OrchestratorState = {
         "goal": goal,
         "session_id": session_id,

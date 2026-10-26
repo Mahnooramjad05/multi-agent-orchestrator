@@ -29,6 +29,9 @@ data/episodic_log.jsonl
 # Eval output artifacts
 eval_report.json
 
+# Fitted confidence calibration (environment-specific; regenerate with python -m eval.calibrate)
+data/calibration.json
+
 # Editors / OS
 .vscode/
 .idea/

@@ -9,6 +9,7 @@ the underlying LLM call via the semantic cache.
 
 from __future__ import annotations
 
+import os
 from typing import Optional, Type, TypeVar
 
 from pydantic import BaseModel
@@ -17,6 +18,7 @@ from agentic_memory.episodic import EpisodicMemory
 from agentic_memory.long_term import LongTermMemory
 from agentic_memory.semantic_cache import SemanticCache
 from agentic_memory.short_term import ShortTermMemory
+from orchestrator.idempotency import IdempotencyStore
 from orchestrator.llm_client import LLMClient, get_llm_client
 
 T = TypeVar("T", bound=BaseModel)
@@ -31,6 +33,8 @@ class MemoryManager:
         self.long_term = LongTermMemory(embed_fn=self.llm_client.embed)
         self.episodic = EpisodicMemory(embed_fn=self.llm_client.embed)
         self.semantic_cache = SemanticCache(embed_fn=self.llm_client.embed)
+        # Completed worker attempts by idempotency key (in-memory unless IDEMPOTENCY_DB is set).
+        self.idempotency = IdempotencyStore(os.getenv("IDEMPOTENCY_DB") or None)
 
         # Simple counters used by the eval harness for efficiency scoring.
         self.llm_call_count = 0

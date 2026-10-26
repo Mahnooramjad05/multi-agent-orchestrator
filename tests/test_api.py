@@ -30,3 +30,6 @@ def test_run_endpoint_returns_final_answer_and_trace():
     assert "replans" in body
     assert "llm_calls" in body
     assert "trace" in body
+    assert body["run_id"]
+    assert body["stop_reason"] in {"all_confident", "max_replans"}
+    assert body["attempts"] and body["attempts"][0]["idempotency_key"]

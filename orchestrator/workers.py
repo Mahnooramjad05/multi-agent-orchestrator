@@ -151,3 +151,12 @@ WORKER_REGISTRY = {
     "calculator": calculator_worker,
     "writer": writer_worker,
 }
+
+# Whether a worker changes anything outside the run (emails, DB writes, paid
+# API calls). None of the current workers do, but the orchestrator checks
+# idempotency keys for every worker so adding one with side effects is safe.
+WORKER_SIDE_EFFECTS = {
+    "research": False,
+    "calculator": False,
+    "writer": False,
+}

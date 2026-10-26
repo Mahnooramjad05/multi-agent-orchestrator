@@ -25,6 +25,7 @@ from pydantic import BaseModel, Field
 
 from agentic_memory.manager import MemoryManager
 from orchestrator.graph import run_goal
+from orchestrator.schemas import AttemptRecord
 
 app = FastAPI(
     title="Multi-Agent Orchestration System",
@@ -58,11 +59,14 @@ class SubtaskTrace(BaseModel):
 
 class RunResponse(BaseModel):
     goal: str
+    run_id: str
+    stop_reason: str
     final_answer: str
     subtasks: list[SubtaskTrace]
     replans: int
     llm_calls: int
     cache_hits: int
+    attempts: list[AttemptRecord]
     trace: list[dict]
 
 
@@ -96,10 +100,13 @@ def run(request: RunRequest) -> RunResponse:
 
     return RunResponse(
         goal=request.goal,
+        run_id=final_state["run_id"],
+        stop_reason=final_state["stop_reason"],
         final_answer=final_state["final_answer"],
         subtasks=subtasks,
         replans=final_state["replans"],
         llm_calls=memory.llm_call_count,
         cache_hits=memory.cache_hit_count,
+        attempts=final_state["attempts"],
         trace=final_state["trace"],
     )

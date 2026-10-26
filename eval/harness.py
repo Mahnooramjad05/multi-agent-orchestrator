@@ -29,8 +29,8 @@ import numpy as np
 import yaml
 
 from agentic_memory.manager import MemoryManager
-from orchestrator.graph import run_goal
-from orchestrator.schemas import EpisodicRecord
+from orchestrator.graph import episode_from_state, run_goal
+from orchestrator.schemas import AttemptRecord
 
 DEFAULT_BENCHMARKS_PATH = Path("benchmarks") / "goals.yaml"
 SIMILARITY_MATCH_THRESHOLD = 0.65
@@ -50,6 +50,9 @@ class GoalResult:
     replans: int = 0
     efficiency_score: float = 0.0
     duration_seconds: float = 0.0
+    run_id: str = ""
+    stop_reason: str = ""
+    attempts: list[AttemptRecord] = field(default_factory=list)
 
 
 @dataclass
@@ -77,6 +80,9 @@ class EvalReport:
                     "replans": r.replans,
                     "efficiency_score": r.efficiency_score,
                     "duration_seconds": round(r.duration_seconds, 4),
+                    "run_id": r.run_id,
+                    "stop_reason": r.stop_reason,
+                    "attempts": [a.model_dump() for a in r.attempts],
                 }
                 for r in self.results
             ],
@@ -153,13 +159,13 @@ def run_eval(
 
         memory.reset_counters()
         start = time.perf_counter()
-        final_state = run_goal(goal_text, memory, session_id=f"eval-{abs(hash(goal_text))}")
+        final_state = run_goal(
+            goal_text, memory, session_id=f"eval-{abs(hash(goal_text))}", log_episode=False
+        )
         duration = time.perf_counter() - start
 
         final_answer = final_state["final_answer"]
-        worker_invocations = sum(
-            1 for event in final_state["trace"] if event["event"] == "worker_run"
-        )
+        worker_invocations = sum(1 for a in final_state["attempts"] if a.status != "reused")
         replans = final_state["replans"]
 
         completion_score, found, missed = score_completion(
@@ -182,21 +188,14 @@ def run_eval(
             replans=replans,
             efficiency_score=efficiency_score,
             duration_seconds=duration,
+            run_id=final_state["run_id"],
+            stop_reason=final_state["stop_reason"],
+            attempts=list(final_state["attempts"]),
         )
         results.append(result)
 
         if log_episodes:
-            memory.episodic.log_episode(
-                EpisodicRecord(
-                    goal=goal_text,
-                    plan=[ex.subtask.description for ex in final_state["executions"]],
-                    outcome=final_answer,
-                    score=completion_score,
-                    llm_calls=memory.llm_call_count,
-                    worker_invocations=worker_invocations,
-                    replans=replans,
-                )
-            )
+            memory.episodic.log_episode(episode_from_state(final_state, memory, score=completion_score))
 
     avg_completion = sum(r.completion_score for r in results) / len(results) if results else 0.0
     avg_efficiency = sum(r.efficiency_score for r in results) / len(results) if results else 0.0

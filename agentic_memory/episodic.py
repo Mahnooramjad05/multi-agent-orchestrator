@@ -34,7 +34,7 @@ class EpisodicMemory:
         log_path: Optional[Path] = None,
     ) -> None:
         self._embed_fn = embed_fn
-        self._log_path = log_path or DEFAULT_LOG_PATH
+        self._log_path = Path(log_path or os.getenv("EPISODIC_LOG_PATH") or DEFAULT_LOG_PATH)
         self._log_path.parent.mkdir(parents=True, exist_ok=True)
 
     def log_episode(self, record: EpisodicRecord) -> None:

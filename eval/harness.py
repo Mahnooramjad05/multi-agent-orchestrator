@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -52,6 +53,8 @@ class GoalResult:
     duration_seconds: float = 0.0
     run_id: str = ""
     stop_reason: str = ""
+    input_tokens: int = 0
+    output_tokens: int = 0
     attempts: list[AttemptRecord] = field(default_factory=list)
 
 
@@ -63,6 +66,9 @@ class EvalReport:
     total_llm_calls: int
     total_cache_hits: int
     total_replans: int
+    total_tokens: int = 0
+    tokens_estimated: bool = False
+    stop_reasons: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -82,6 +88,8 @@ class EvalReport:
                     "duration_seconds": round(r.duration_seconds, 4),
                     "run_id": r.run_id,
                     "stop_reason": r.stop_reason,
+                    "input_tokens": r.input_tokens,
+                    "output_tokens": r.output_tokens,
                     "attempts": [a.model_dump() for a in r.attempts],
                 }
                 for r in self.results
@@ -92,6 +100,9 @@ class EvalReport:
                 "total_llm_calls": self.total_llm_calls,
                 "total_cache_hits": self.total_cache_hits,
                 "total_replans": self.total_replans,
+                "total_tokens": self.total_tokens,
+                "tokens_estimated": self.tokens_estimated,
+                "stop_reasons": self.stop_reasons,
                 "num_goals": len(self.results),
             },
         }
@@ -190,6 +201,8 @@ def run_eval(
             duration_seconds=duration,
             run_id=final_state["run_id"],
             stop_reason=final_state["stop_reason"],
+            input_tokens=final_state["usage"]["input_tokens"],
+            output_tokens=final_state["usage"]["output_tokens"],
             attempts=list(final_state["attempts"]),
         )
         results.append(result)
@@ -207,6 +220,9 @@ def run_eval(
         total_llm_calls=sum(r.llm_calls for r in results),
         total_cache_hits=sum(r.cache_hits for r in results),
         total_replans=sum(r.replans for r in results),
+        total_tokens=sum(r.input_tokens + r.output_tokens for r in results),
+        tokens_estimated=memory.tokens_estimated,
+        stop_reasons=dict(Counter(r.stop_reason for r in results)),
     )
 
 
@@ -220,7 +236,8 @@ def print_report(report: EvalReport) -> None:
         print(f"  Completion: {status}  | Efficiency: {r.efficiency_score:.3f}")
         print(f"  LLM calls: {r.llm_calls}  Cache hits: {r.cache_hits}  "
               f"Workers: {r.worker_invocations}  Replans: {r.replans}  "
-              f"Time: {r.duration_seconds:.3f}s")
+              f"Tokens: {r.input_tokens + r.output_tokens}  "
+              f"Time: {r.duration_seconds:.3f}s  Stop: {r.stop_reason}")
         if r.facts_missed:
             print(f"  Missed facts: {r.facts_missed}")
     print("\n" + "-" * 72)
@@ -228,6 +245,8 @@ def print_report(report: EvalReport) -> None:
     print(f"Average efficiency score: {report.average_efficiency_score:.4f}")
     print(f"Total LLM calls: {report.total_llm_calls}  Total cache hits: {report.total_cache_hits}  "
           f"Total replans: {report.total_replans}")
+    estimated = " (estimated)" if report.tokens_estimated else ""
+    print(f"Total tokens: {report.total_tokens}{estimated}  Stop reasons: {report.stop_reasons}")
     print("=" * 72)
 
 

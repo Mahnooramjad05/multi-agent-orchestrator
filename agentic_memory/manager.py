@@ -39,10 +39,30 @@ class MemoryManager:
         # Simple counters used by the eval harness for efficiency scoring.
         self.llm_call_count = 0
         self.cache_hit_count = 0
+        # Token usage across LLM calls (cache hits cost nothing). Budgets read these.
+        self.input_tokens = 0
+        self.output_tokens = 0
+        self.tokens_estimated = False
+
+    @property
+    def total_tokens(self) -> int:
+        return self.input_tokens + self.output_tokens
 
     def reset_counters(self) -> None:
         self.llm_call_count = 0
         self.cache_hit_count = 0
+        self.input_tokens = 0
+        self.output_tokens = 0
+        self.tokens_estimated = False
+
+    def _record_usage(self) -> None:
+        self.llm_call_count += 1
+        usage = self.llm_client.last_usage
+        if usage is None:
+            return
+        self.input_tokens += usage.input_tokens
+        self.output_tokens += usage.output_tokens
+        self.tokens_estimated = self.tokens_estimated or usage.estimated
 
     def cached_invoke_text(self, system: str, prompt: str) -> str:
         """Text completion, short-circuited by the semantic cache when possible."""
@@ -52,7 +72,7 @@ class MemoryManager:
             self.cache_hit_count += 1
             return cached
         response = self.llm_client.invoke_text(system, prompt)
-        self.llm_call_count += 1
+        self._record_usage()
         self.semantic_cache.put(cache_key, response)
         return response
 
@@ -64,5 +84,5 @@ class MemoryManager:
         for efficiency scoring, and go through the same client.
         """
         result = self.llm_client.invoke_structured(system, prompt, schema)
-        self.llm_call_count += 1
+        self._record_usage()
         return result

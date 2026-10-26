@@ -24,6 +24,7 @@ from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
 from agentic_memory.manager import MemoryManager
+from orchestrator.budget import Budget
 from orchestrator.graph import run_goal
 from orchestrator.schemas import AttemptRecord
 
@@ -47,6 +48,12 @@ def get_memory_manager() -> MemoryManager:
 class RunRequest(BaseModel):
     goal: str = Field(..., description="The high-level goal to accomplish.")
     session_id: str = Field(default="default", description="Session id for memory scoping.")
+    max_tokens: Optional[int] = Field(
+        default=None, gt=0, description="Token budget for this run (default: BUDGET_MAX_TOKENS or unlimited)."
+    )
+    max_seconds: Optional[float] = Field(
+        default=None, gt=0, description="Wall-clock budget in seconds (default: BUDGET_MAX_SECONDS or unlimited)."
+    )
 
 
 class SubtaskTrace(BaseModel):
@@ -66,6 +73,10 @@ class RunResponse(BaseModel):
     replans: int
     llm_calls: int
     cache_hits: int
+    input_tokens: int
+    output_tokens: int
+    tokens_estimated: bool
+    budget: dict
     attempts: list[AttemptRecord]
     trace: list[dict]
 
@@ -85,7 +96,12 @@ def run(request: RunRequest) -> RunResponse:
     memory = get_memory_manager()
     memory.reset_counters()
 
-    final_state = run_goal(request.goal, memory, session_id=request.session_id)
+    budget = Budget.from_env()
+    if request.max_tokens is not None:
+        budget.max_tokens = request.max_tokens
+    if request.max_seconds is not None:
+        budget.max_seconds = request.max_seconds
+    final_state = run_goal(request.goal, memory, session_id=request.session_id, budget=budget)
 
     subtasks = [
         SubtaskTrace(
@@ -107,6 +123,10 @@ def run(request: RunRequest) -> RunResponse:
         replans=final_state["replans"],
         llm_calls=memory.llm_call_count,
         cache_hits=memory.cache_hit_count,
+        input_tokens=final_state["usage"]["input_tokens"],
+        output_tokens=final_state["usage"]["output_tokens"],
+        tokens_estimated=final_state["usage"]["estimated"],
+        budget=final_state["budget"],
         attempts=final_state["attempts"],
         trace=final_state["trace"],
     )

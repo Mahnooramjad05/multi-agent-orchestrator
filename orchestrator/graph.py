@@ -20,8 +20,9 @@ Graph structure
 - assess            : decides whether to stop, and records why in
                       `stop_reason`. The conditional edge after it routes to
                       `replan` when any subtask's confidence is below
-                      CONFIDENCE_THRESHOLD and we have not exceeded
-                      MAX_REPLANS; otherwise to `synthesize`.
+                      CONFIDENCE_THRESHOLD, we have not exceeded MAX_REPLANS,
+                      and the projected cost of a replan fits the run's token
+                      and time budget; otherwise to `synthesize`.
 - replan            : re-decomposes only the failed subtask(s) into fresh
                       subtasks (dynamic replanning / error recovery), then
                       loops back to dispatch_workers. Bounded by MAX_REPLANS
@@ -39,6 +40,7 @@ from typing import Optional, TypedDict
 from langgraph.graph import END, StateGraph
 
 from agentic_memory.manager import MemoryManager
+from orchestrator.budget import Budget, BudgetTracker
 from orchestrator.idempotency import make_idempotency_key
 from orchestrator.schemas import (
     AttemptRecord,
@@ -67,6 +69,8 @@ class OrchestratorState(TypedDict):
     final_answer: str
     trace: list[dict]
     duration_seconds: float
+    usage: dict
+    budget: dict
 
 
 def _log(state: OrchestratorState, event: str, **details) -> None:
@@ -81,8 +85,16 @@ def _low_confidence(state: OrchestratorState) -> list[SubTaskExecution]:
     ]
 
 
-def build_graph(memory: MemoryManager):
+def _attempt_key(state: OrchestratorState, execution: SubTaskExecution) -> str:
+    subtask = execution.subtask
+    return make_idempotency_key(
+        state["run_id"], subtask.id, execution.attempt, subtask.worker, subtask.description
+    )
+
+
+def build_graph(memory: MemoryManager, tracker: Optional[BudgetTracker] = None):
     """Construct and compile the LangGraph StateGraph for one orchestrator run."""
+    tracker = tracker or BudgetTracker(Budget(), memory)
 
     def decompose_node(state: OrchestratorState) -> OrchestratorState:
         system = (
@@ -103,11 +115,10 @@ def build_graph(memory: MemoryManager):
     def run_attempt(state: OrchestratorState, execution: SubTaskExecution, context: str) -> None:
         """Run (or reuse) one worker attempt and record it."""
         subtask = execution.subtask
-        key = make_idempotency_key(
-            state["run_id"], subtask.id, execution.attempt, subtask.worker, subtask.description
-        )
+        key = _attempt_key(state, execution)
         started_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
         start = time.perf_counter()
+        tokens_in, tokens_out = memory.input_tokens, memory.output_tokens
 
         reused = memory.idempotency.get(key)
         if reused is not None:
@@ -148,6 +159,8 @@ def build_graph(memory: MemoryManager):
                 calibrated_confidence=execution.calibrated_confidence,
                 output=result.output[:ATTEMPT_OUTPUT_LIMIT],
                 notes=result.notes,
+                input_tokens=memory.input_tokens - tokens_in,
+                output_tokens=memory.output_tokens - tokens_out,
                 latency_ms=round((time.perf_counter() - start) * 1000, 2),
                 started_at=started_at,
             )
@@ -177,19 +190,56 @@ def build_graph(memory: MemoryManager):
             confidence = execution.effective_confidence
             if confidence is not None and confidence >= CONFIDENCE_THRESHOLD:
                 continue  # already succeeded in a previous pass
+            reason = state["stop_reason"] or tracker.exhausted()
+            if reason:
+                # Out of budget: record the attempt as skipped and leave the rest for synthesis.
+                state["stop_reason"] = reason
+                skip_attempt(state, execution, reason)
+                continue
             run_attempt(state, execution, context)
         return state
 
+    def skip_attempt(state: OrchestratorState, execution: SubTaskExecution, reason: str) -> None:
+        subtask = execution.subtask
+        state["attempts"].append(
+            AttemptRecord(
+                run_id=state["run_id"],
+                subtask_id=subtask.id,
+                attempt=execution.attempt,
+                idempotency_key=_attempt_key(state, execution),
+                worker=subtask.worker,
+                description=subtask.description,
+                status="skipped_budget",
+                notes=f"Not run: {reason.replace('_', ' ')} reached.",
+                started_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            )
+        )
+        _log(state, "worker_skipped", subtask_id=subtask.id, attempt=execution.attempt, reason=reason)
+
+    def projected_replan_cost(state: OrchestratorState, failing: int) -> tuple[float, float]:
+        """Estimate tokens and seconds for replanning `failing` subtasks: one replan call
+        plus one new attempt each, both costed at the average attempt so far."""
+        ran = [a for a in state["attempts"] if a.status not in ("reused", "skipped_budget")]
+        if not ran:
+            return 0.0, 0.0
+        avg_tokens = sum(a.input_tokens + a.output_tokens for a in ran) / len(ran)
+        avg_seconds = sum(a.latency_ms for a in ran) / len(ran) / 1000
+        return 2 * failing * avg_tokens, 2 * failing * avg_seconds
+
     def assess_node(state: OrchestratorState) -> OrchestratorState:
         """Decide whether the run stops here; `stop_reason` stays empty to keep going."""
-        if not _low_confidence(state):
+        low = _low_confidence(state)
+        if state["stop_reason"]:
+            pass  # dispatch already ran out of budget
+        elif not low:
             state["stop_reason"] = "all_confident"
         elif state["replans"] >= MAX_REPLANS:
             state["stop_reason"] = "max_replans"
         else:
-            state["stop_reason"] = ""
+            tokens, seconds = projected_replan_cost(state, len(low))
+            state["stop_reason"] = tracker.exhausted() or tracker.can_afford(tokens, seconds) or ""
         if state["stop_reason"]:
-            _log(state, "stop", reason=state["stop_reason"])
+            _log(state, "stop", reason=state["stop_reason"], **tracker.snapshot())
         return state
 
     def route_after_assess(state: OrchestratorState) -> str:
@@ -273,15 +323,19 @@ def run_goal(
     session_id: str = "default",
     run_id: Optional[str] = None,
     log_episode: bool = True,
+    budget: Optional[Budget] = None,
 ) -> OrchestratorState:
     """Convenience entry point: run one goal through the compiled graph end to end.
 
     Pass an existing `run_id` to resume a run: attempts that already completed
     under that id are reused via their idempotency keys instead of re-executed.
     Set `log_episode=False` when the caller logs the episode itself (the eval
-    harness does, so it can attach a completion score).
+    harness does, so it can attach a completion score). `budget` defaults to
+    BUDGET_MAX_TOKENS / BUDGET_MAX_SECONDS from the environment (unlimited if unset).
     """
-    compiled = build_graph(memory)
+    tracker = BudgetTracker(budget or Budget.from_env(), memory)
+    tokens_in, tokens_out = memory.input_tokens, memory.output_tokens
+    compiled = build_graph(memory, tracker)
     initial_state: OrchestratorState = {
         "goal": goal,
         "session_id": session_id,
@@ -294,6 +348,8 @@ def run_goal(
         "final_answer": "",
         "trace": [],
         "duration_seconds": 0.0,
+        "usage": {},
+        "budget": {},
     }
     start = time.perf_counter()
     memory.short_term.add_turn(session_id, "user", goal)
@@ -301,6 +357,12 @@ def run_goal(
     memory.short_term.add_turn(session_id, "assistant", final_state["final_answer"])
     memory.long_term.add_fact(session_id, f"Goal: {goal} -> {final_state['final_answer'][:300]}")
     final_state["duration_seconds"] = round(time.perf_counter() - start, 4)
+    final_state["usage"] = {
+        "input_tokens": memory.input_tokens - tokens_in,
+        "output_tokens": memory.output_tokens - tokens_out,
+        "estimated": memory.tokens_estimated,
+    }
+    final_state["budget"] = tracker.snapshot()
 
     if log_episode:
         memory.episodic.log_episode(episode_from_state(final_state, memory))
@@ -321,6 +383,9 @@ def episode_from_state(
         replans=state["replans"],
         run_id=state["run_id"],
         attempts=state["attempts"],
+        input_tokens=state["usage"].get("input_tokens", 0),
+        output_tokens=state["usage"].get("output_tokens", 0),
+        tokens_estimated=state["usage"].get("estimated", False),
         duration_seconds=state["duration_seconds"],
         stop_reason=state["stop_reason"],
     )

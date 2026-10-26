@@ -33,3 +33,18 @@ def test_run_endpoint_returns_final_answer_and_trace():
     assert body["run_id"]
     assert body["stop_reason"] in {"all_confident", "max_replans"}
     assert body["attempts"] and body["attempts"][0]["idempotency_key"]
+
+
+def test_run_endpoint_applies_budget():
+    response = client.post("/run", json={"goal": "Find facts about coffee.", "max_tokens": 50})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["stop_reason"] == "token_budget"
+    assert body["budget"]["max_tokens"] == 50
+    assert body["final_answer"]
+    assert body["input_tokens"] > 0 and body["tokens_estimated"] is True
+
+
+def test_run_endpoint_rejects_invalid_budget():
+    response = client.post("/run", json={"goal": "x", "max_tokens": 0})
+    assert response.status_code == 422

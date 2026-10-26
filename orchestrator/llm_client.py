@@ -23,6 +23,7 @@ import json
 import os
 import re
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import Any, Optional, Type, TypeVar
 
 from pydantic import BaseModel
@@ -30,11 +31,41 @@ from pydantic import BaseModel
 T = TypeVar("T", bound=BaseModel)
 
 
+@dataclass
+class Usage:
+    """Token usage of one LLM call. `estimated` is True when no provider counts were available."""
+
+    input_tokens: int = 0
+    output_tokens: int = 0
+    estimated: bool = False
+
+
+def estimate_tokens(text: str) -> int:
+    """Rough token estimate (~4 characters per token) for backends that don't report usage."""
+    return max(1, len(text) // 4)
+
+
+def _usage_from_message(message: Any, fallback_in: str, fallback_out: str) -> Usage:
+    metadata = getattr(message, "usage_metadata", None) or {}
+    if metadata.get("input_tokens") is not None:
+        return Usage(int(metadata["input_tokens"]), int(metadata.get("output_tokens") or 0))
+    return Usage(estimate_tokens(fallback_in), estimate_tokens(fallback_out), estimated=True)
+
+
+def _request_timeout() -> float:
+    """Per-request timeout in seconds for real providers (LLM_REQUEST_TIMEOUT, default 60)."""
+    value = os.getenv("LLM_REQUEST_TIMEOUT", "").strip()
+    return float(value) if value else 60.0
+
+
 class LLMClient(ABC):
     """Common interface every provider (real or mock) must implement."""
 
     #: Human-readable name of the backend, used in traces/logs.
     name: str = "base"
+
+    #: Token usage of the most recent invoke_text / invoke_structured call.
+    last_usage: Optional[Usage] = None
 
     @abstractmethod
     def invoke_text(self, system: str, prompt: str) -> str:
@@ -78,10 +109,12 @@ class MockLLMClient(LLMClient):
         # Simple deterministic "summary" style response so downstream
         # synthesis / writing workers have something coherent to work with.
         snippet = prompt.strip().replace("\n", " ")[:280]
-        return (
+        response = (
             f"[mock-llm response] Based on the input, here is a deterministic "
             f"summary: {snippet}"
         )
+        self.last_usage = Usage(estimate_tokens(system + prompt), estimate_tokens(response), estimated=True)
+        return response
 
     def invoke_structured(self, system: str, prompt: str, schema: Type[T]) -> T:
         """
@@ -100,14 +133,18 @@ class MockLLMClient(LLMClient):
         )
 
         if schema is Plan:
-            return _mock_plan(prompt)  # type: ignore[return-value]
-        if schema is WorkerResult:
-            return _mock_worker_result(prompt)  # type: ignore[return-value]
-        if schema is SubTask:
-            return _mock_subtask(prompt)  # type: ignore[return-value]
-
-        # Generic fallback: fill required fields with deterministic stubs.
-        return _mock_generic(schema, prompt)
+            result = _mock_plan(prompt)
+        elif schema is WorkerResult:
+            result = _mock_worker_result(prompt)
+        elif schema is SubTask:
+            result = _mock_subtask(prompt)
+        else:
+            # Generic fallback: fill required fields with deterministic stubs.
+            result = _mock_generic(schema, prompt)
+        self.last_usage = Usage(
+            estimate_tokens(system + prompt), estimate_tokens(result.model_dump_json()), estimated=True
+        )
+        return result  # type: ignore[return-value]
 
     def embed(self, text: str) -> list[float]:
         return deterministic_embedding(text, dim=self._EMBED_DIM)
@@ -237,21 +274,17 @@ class OpenAILLMClient(LLMClient):
     def __init__(self, model: str = "gpt-4o-mini") -> None:
         from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
-        self._chat = ChatOpenAI(model=model, temperature=0)
+        self._chat = ChatOpenAI(model=model, temperature=0, timeout=_request_timeout())
         self._embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
 
     def invoke_text(self, system: str, prompt: str) -> str:
         messages = [("system", system), ("human", prompt)]
         result = self._chat.invoke(messages)
+        self.last_usage = _usage_from_message(result, system + prompt, str(result.content))
         return str(result.content)
 
     def invoke_structured(self, system: str, prompt: str, schema: Type[T]) -> T:
-        structured_llm = self._chat.with_structured_output(schema)
-        messages = [("system", system), ("human", prompt)]
-        result = structured_llm.invoke(messages)
-        if isinstance(result, dict):
-            return schema(**result)
-        return result  # type: ignore[return-value]
+        return _invoke_structured_with_usage(self, system, prompt, schema)
 
     def embed(self, text: str) -> list[float]:
         return self._embeddings.embed_query(text)
@@ -276,24 +309,41 @@ class AnthropicLLMClient(LLMClient):
     def __init__(self, model: str = "claude-sonnet-5") -> None:
         from langchain_anthropic import ChatAnthropic
 
-        self._chat = ChatAnthropic(model_name=model, temperature=0, max_tokens_to_sample=2048)
+        self._chat = ChatAnthropic(
+            model_name=model,
+            temperature=0,
+            max_tokens_to_sample=2048,
+            default_request_timeout=_request_timeout(),
+        )
 
     def invoke_text(self, system: str, prompt: str) -> str:
         messages = [("system", system), ("human", prompt)]
         result = self._chat.invoke(messages)
+        self.last_usage = _usage_from_message(result, system + prompt, str(result.content))
         return str(result.content)
 
     def invoke_structured(self, system: str, prompt: str, schema: Type[T]) -> T:
-        structured_llm = self._chat.with_structured_output(schema)
-        messages = [("system", system), ("human", prompt)]
-        result = structured_llm.invoke(messages)
-        if isinstance(result, dict):
-            return schema(**result)
-        return result  # type: ignore[return-value]
+        return _invoke_structured_with_usage(self, system, prompt, schema)
 
     def embed(self, text: str) -> list[float]:
         # No native Anthropic embeddings API -- deterministic fallback.
         return deterministic_embedding(text, dim=64)
+
+
+def _invoke_structured_with_usage(client: Any, system: str, prompt: str, schema: Type[T]) -> T:
+    """Structured output via LangChain, keeping the raw message so token usage is recorded."""
+    structured_llm = client._chat.with_structured_output(schema, include_raw=True)
+    messages = [("system", system), ("human", prompt)]
+    response = structured_llm.invoke(messages)
+    raw, parsed = response.get("raw"), response.get("parsed")
+    client.last_usage = _usage_from_message(raw, system + prompt, str(getattr(raw, "content", "")))
+    if parsed is None:
+        raise ValueError(
+            f"Structured output did not match {schema.__name__}: {response.get('parsing_error')}"
+        )
+    if isinstance(parsed, dict):
+        return schema(**parsed)
+    return parsed  # type: ignore[return-value]
 
 
 # ---------------------------------------------------------------------------

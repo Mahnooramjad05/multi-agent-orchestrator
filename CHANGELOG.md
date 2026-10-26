@@ -32,6 +32,13 @@ weren't traceable, and the retry cap bounded loops but not cost or latency.
 - `stop_reason` on every run: `all_confident`, `max_replans`,
   `token_budget` or `time_budget`.
 
+### Fixed
+
+- The writer now sees results produced earlier in the same pass. Previously
+  `dispatch_workers` built the shared context before any worker ran, so on
+  the first pass the writer always received an empty context and reported
+  0.6 confidence.
+
 ### Changed
 
 - New `assess` node between `dispatch_workers` and the routing edge; it

@@ -185,16 +185,19 @@ def build_graph(
             status=status,
         )
 
-    def dispatch_workers_node(state: OrchestratorState) -> OrchestratorState:
-        # Build a running context string from already-completed subtasks so
-        # later workers (especially the writer) can build on earlier results.
-        context_parts = [
+    def completed_context(state: OrchestratorState, current: SubTaskExecution) -> str:
+        """Results of the other subtasks that have one so far, for workers that build on them.
+
+        Rebuilt before every attempt so a writer later in the plan sees research and
+        calculator results produced earlier in the same pass, not only previous passes.
+        """
+        return "\n".join(
             f"- {ex.subtask.description}: {ex.result.output}"
             for ex in state["executions"]
-            if ex.result is not None
-        ]
-        context = "\n".join(context_parts)
+            if ex is not current and ex.result is not None
+        )
 
+    def dispatch_workers_node(state: OrchestratorState) -> OrchestratorState:
         for execution in state["executions"]:
             confidence = execution.effective_confidence
             if confidence is not None and confidence >= CONFIDENCE_THRESHOLD:
@@ -205,7 +208,7 @@ def build_graph(
                 state["stop_reason"] = reason
                 skip_attempt(state, execution, reason)
                 continue
-            run_attempt(state, execution, context)
+            run_attempt(state, execution, completed_context(state, execution))
         return state
 
     def skip_attempt(state: OrchestratorState, execution: SubTaskExecution, reason: str) -> None:

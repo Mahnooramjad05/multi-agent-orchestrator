@@ -8,7 +8,7 @@ This project is a runnable implementation of an orchestrator-workers multi-agent
 
 Three improvements prompted by community feedback on the first release (full list in `CHANGELOG.md`):
 
-- **Calibrated confidence.** Worker confidence scores are heuristics. `python -m eval.calibrate` measures how often attempts at each score actually succeed on the benchmark, fits a per-worker calibration, and the graph applies the replanning threshold to the calibrated value. On the 30-goal benchmark in mock mode, expected calibration error drops from 0.196 to 0.015 (in-sample).
+- **Calibrated confidence.** Worker confidence scores are heuristics. `python -m eval.calibrate` measures how often attempts at each score actually succeed on the benchmark, fits a per-worker calibration, and the graph applies the replanning threshold to the calibrated value. On the 30-goal benchmark in mock mode, expected calibration error drops from 0.341 to 0.023 (in-sample). Most of that gap comes from the writer, which reports 0.9 whenever it has upstream context but only produces a complete answer about a quarter of the time.
 - **Traceable, idempotent retries.** Every worker attempt is logged with its own idempotency key, status, confidence, tokens and latency. Resuming a run with the same `run_id` reuses completed attempts instead of re-running them.
 - **Token and wall-clock budgets.** Runs can be capped by tokens and seconds, not just retries. Replans only happen when their projected cost fits, and a reserve guarantees the run still returns an answer. Every run reports a `stop_reason`.
 
